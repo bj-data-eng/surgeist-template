@@ -16,7 +16,12 @@ mod render;
 mod span;
 mod validate;
 
+pub use ast::{
+    AttrPart, AttrValue, Attribute, ElementName, ElementNode, ForEachNode, IfBranch, IfNode,
+    InterpolationNode, Node, TemplateDocument, TextNode,
+};
 pub use error::{ParseError, ParseErrorKind, ValidationError, ValidationErrorKind};
+pub use expr::{BinaryOp, Expr, Literal, PathField, PathIndex, PathSegment, UnaryOp, VariablePath};
 pub use name::{AttributeName, ComponentName, NameError, NativeElementName, VariableName};
 pub use span::{SourcePos, SourceSpan};
 
