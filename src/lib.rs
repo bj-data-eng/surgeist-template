@@ -25,6 +25,12 @@ pub use expr::{BinaryOp, Expr, Literal, PathField, PathIndex, PathSegment, Unary
 pub use name::{AttributeName, ComponentName, NameError, NativeElementName, VariableName};
 pub use parser::parse_template;
 pub use span::{SourcePos, SourceSpan};
+pub use validate::{
+    AttributeKind, AttributeRule, AttributeSpec, ComponentRegistry, ComponentSpec,
+    NativeElementRegistry, NativeElementSpec, RegistryError, ValidatedAttrPart, ValidatedAttrValue,
+    ValidatedAttribute, ValidatedElement, ValidatedForEach, ValidatedIf, ValidatedIfBranch,
+    ValidatedInterpolation, ValidatedNode, ValidatedTemplate, ValidatedText, validate_template,
+};
 
 /// Crate identity string used by smoke tests and API artifacts.
 pub const CRATE_NAME: &str = "surgeist-template";

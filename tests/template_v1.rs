@@ -1,5 +1,7 @@
 use surgeist_template::{
-    AttrPart, AttrValue, Expr, Literal, Node, ParseErrorKind, PathSegment, parse_template,
+    AttrPart, AttrValue, AttributeKind, AttributeRule, AttributeSpec, ComponentRegistry,
+    ComponentSpec, Expr, Literal, NativeElementRegistry, NativeElementSpec, Node, ParseErrorKind,
+    PathSegment, RegistryError, ValidationErrorKind, parse_template, validate_template,
 };
 
 #[test]
@@ -217,4 +219,209 @@ fn rejects_malformed_indexed_variable_paths() {
                 | ParseErrorKind::UnexpectedToken { .. }
         ));
     }
+}
+
+#[test]
+fn validates_known_native_and_component_names() {
+    let document = parse_template("<Panel><div>Body</div></Panel>").expect("template parses");
+    let native = NativeElementRegistry::try_from_specs(vec![
+        NativeElementSpec::try_new("div", Vec::new()).expect("valid native spec"),
+    ])
+    .expect("valid native registry");
+    let components = ComponentRegistry::try_from_specs(vec![
+        ComponentSpec::try_new("Panel", Vec::new()).expect("valid component spec"),
+    ])
+    .expect("valid component registry");
+
+    let validated = validate_template(&document, &native, &components).expect("template validates");
+
+    assert_eq!(validated.nodes().len(), 1);
+}
+
+#[test]
+fn rejects_unknown_component() {
+    let document = parse_template("<MissingWidget />").expect("template parses");
+    let native = NativeElementRegistry::try_from_specs(Vec::new()).expect("valid native registry");
+    let components = ComponentRegistry::try_from_specs(vec![
+        ComponentSpec::try_new("Panel", Vec::new()).expect("valid component spec"),
+    ])
+    .expect("valid component registry");
+
+    let error =
+        validate_template(&document, &native, &components).expect_err("unknown component fails");
+
+    assert!(matches!(
+        error.kind(),
+        ValidationErrorKind::UnknownComponent { name } if name == "MissingWidget"
+    ));
+}
+
+#[test]
+fn rejects_unknown_native_element() {
+    let document = parse_template("<section />").expect("template parses");
+    let native = NativeElementRegistry::try_from_specs(vec![
+        NativeElementSpec::try_new("div", Vec::new()).expect("valid native spec"),
+    ])
+    .expect("valid native registry");
+    let components =
+        ComponentRegistry::try_from_specs(Vec::new()).expect("valid component registry");
+
+    let error =
+        validate_template(&document, &native, &components).expect_err("unknown native fails");
+
+    assert!(matches!(
+        error.kind(),
+        ValidationErrorKind::UnknownNativeElement { name } if name == "section"
+    ));
+}
+
+#[test]
+fn rejects_duplicate_authored_attributes() {
+    let document = parse_template(r#"<Panel title="one" title="two" />"#).expect("template parses");
+    let native = NativeElementRegistry::try_from_specs(Vec::new()).expect("valid native registry");
+    let components = ComponentRegistry::try_from_specs(vec![
+        ComponentSpec::try_new(
+            "Panel",
+            vec![
+                AttributeSpec::try_new("title", AttributeRule::one(AttributeKind::Static))
+                    .expect("valid attr spec"),
+            ],
+        )
+        .expect("valid component spec"),
+    ])
+    .expect("valid component registry");
+
+    let error =
+        validate_template(&document, &native, &components).expect_err("duplicate attrs fail");
+
+    assert!(matches!(
+        error.kind(),
+        ValidationErrorKind::DuplicateAttribute { name } if name == "title"
+    ));
+}
+
+#[test]
+fn rejects_unknown_attribute_and_invalid_value_kind() {
+    let native = NativeElementRegistry::try_from_specs(Vec::new()).expect("valid native registry");
+    let components = ComponentRegistry::try_from_specs(vec![
+        ComponentSpec::try_new(
+            "Panel",
+            vec![
+                AttributeSpec::try_new("title", AttributeRule::one(AttributeKind::Expression))
+                    .expect("valid attr spec"),
+            ],
+        )
+        .expect("valid component spec"),
+    ])
+    .expect("valid component registry");
+
+    let unknown = parse_template(r#"<Panel missing="value" />"#).expect("template parses");
+    let unknown_error =
+        validate_template(&unknown, &native, &components).expect_err("unknown attr fails");
+    assert!(matches!(
+        unknown_error.kind(),
+        ValidationErrorKind::InvalidAttribute { element, attribute }
+            if element == "Panel" && attribute == "missing"
+    ));
+
+    let wrong_kind = parse_template(r#"<Panel title="static" />"#).expect("template parses");
+    let wrong_kind_error =
+        validate_template(&wrong_kind, &native, &components).expect_err("wrong attr kind fails");
+    assert!(matches!(
+        wrong_kind_error.kind(),
+        ValidationErrorKind::InvalidAttributeValue { element, attribute }
+            if element == "Panel" && attribute == "title"
+    ));
+}
+
+#[test]
+fn rejects_duplicate_attribute_specs() {
+    let error = ComponentSpec::try_new(
+        "Panel",
+        vec![
+            AttributeSpec::try_new("title", AttributeRule::one(AttributeKind::Static))
+                .expect("valid attr spec"),
+            AttributeSpec::try_new("title", AttributeRule::one(AttributeKind::Expression))
+                .expect("valid attr spec"),
+        ],
+    )
+    .expect_err("duplicate attr spec fails");
+
+    assert!(matches!(
+        error,
+        RegistryError::DuplicateAttributeSpec { name } if name == "title"
+    ));
+}
+
+#[test]
+fn rejects_duplicate_registry_specs_and_invalid_spec_names() {
+    let duplicate_native = NativeElementRegistry::try_from_specs(vec![
+        NativeElementSpec::try_new("div", Vec::new()).expect("valid native spec"),
+        NativeElementSpec::try_new("div", Vec::new()).expect("valid native spec"),
+    ])
+    .expect_err("duplicate native spec fails");
+    assert!(matches!(
+        duplicate_native,
+        RegistryError::DuplicateNativeElement { name } if name == "div"
+    ));
+
+    let duplicate_component = ComponentRegistry::try_from_specs(vec![
+        ComponentSpec::try_new("Panel", Vec::new()).expect("valid component spec"),
+        ComponentSpec::try_new("Panel", Vec::new()).expect("valid component spec"),
+    ])
+    .expect_err("duplicate component spec fails");
+    assert!(matches!(
+        duplicate_component,
+        RegistryError::DuplicateComponent { name } if name == "Panel"
+    ));
+
+    let invalid_native =
+        NativeElementSpec::try_new("Panel", Vec::new()).expect_err("invalid native name fails");
+    assert!(matches!(invalid_native, RegistryError::Name(_)));
+
+    let invalid_component =
+        ComponentSpec::try_new("panel", Vec::new()).expect_err("invalid component name fails");
+    assert!(matches!(invalid_component, RegistryError::Name(_)));
+}
+
+#[test]
+fn multi_kind_attribute_rule_accepts_interpolated_title() {
+    let document =
+        parse_template(r#"<Panel title="Hello {$user.name}" />"#).expect("template parses");
+    let native = NativeElementRegistry::try_from_specs(Vec::new()).expect("valid native registry");
+    let components = ComponentRegistry::try_from_specs(vec![
+        ComponentSpec::try_new(
+            "Panel",
+            vec![
+                AttributeSpec::try_new(
+                    "title",
+                    AttributeRule::any(
+                        AttributeKind::Static,
+                        [AttributeKind::Interpolated, AttributeKind::Expression],
+                    ),
+                )
+                .expect("valid attr spec"),
+            ],
+        )
+        .expect("valid component spec"),
+    ])
+    .expect("valid component registry");
+
+    validate_template(&document, &native, &components).expect("interpolated title validates");
+}
+
+#[test]
+fn parent_unknown_component_error_wins_over_child_validation() {
+    let document =
+        parse_template("<MissingWidget><UnknownChild /></MissingWidget>").expect("template parses");
+    let native = NativeElementRegistry::try_from_specs(Vec::new()).expect("valid native registry");
+    let components =
+        ComponentRegistry::try_from_specs(Vec::new()).expect("valid component registry");
+
+    let error = validate_template(&document, &native, &components).expect_err("validation fails");
+
+    assert!(matches!(
+        error.kind(),
+        ValidationErrorKind::UnknownComponent { name } if name == "MissingWidget"
+    ));
 }
