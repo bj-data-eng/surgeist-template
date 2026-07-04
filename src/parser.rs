@@ -415,7 +415,7 @@ impl<'a> Parser<'a> {
         header: &'b str,
         header_span: SourceSpan,
     ) -> Result<(&'b str, &'b str, SourceSpan), ParseError> {
-        let tokens = tokens_with_spans(header, header_span.start().byte());
+        let tokens = whitespace_tokens(header, header_span.start().byte());
         let as_positions: Vec<usize> = tokens
             .iter()
             .enumerate()
@@ -431,18 +431,21 @@ impl<'a> Parser<'a> {
         }
 
         let as_index = as_positions[0];
-        if as_index != 1 || tokens.len() != 3 {
+        if as_index == 0 || as_index + 2 != tokens.len() {
             return Err(self.cursor.error(
                 ParseErrorKind::InvalidExpression {
-                    reason: "foreach header must be '<collection> as $item'",
+                    reason: "foreach header must contain collection, as, and one item",
                 },
                 header_span,
             ));
         }
 
+        let as_token = &tokens[as_index];
+        let collection_end = as_token.start - header_span.start().byte();
+        let collection = header[..collection_end].trim();
         let item = &tokens[as_index + 1];
         Ok((
-            tokens[0].text,
+            collection,
             item.text,
             SourceSpan::new_unchecked(self.pos_at(item.start), self.pos_at(item.end)),
         ))
@@ -632,19 +635,19 @@ struct BraceTag<'a> {
     full_span: SourceSpan,
 }
 
-struct TokenSpan<'a> {
+struct HeaderToken<'a> {
     text: &'a str,
     start: usize,
     end: usize,
 }
 
-fn tokens_with_spans(source: &str, absolute_start: usize) -> Vec<TokenSpan<'_>> {
+fn whitespace_tokens(source: &str, absolute_start: usize) -> Vec<HeaderToken<'_>> {
     let mut tokens = Vec::new();
     let mut token_start = None;
     for (offset, ch) in source.char_indices() {
         if ch.is_whitespace() {
             if let Some(start) = token_start.take() {
-                tokens.push(TokenSpan {
+                tokens.push(HeaderToken {
                     text: &source[start..offset],
                     start: absolute_start + start,
                     end: absolute_start + offset,
@@ -655,7 +658,7 @@ fn tokens_with_spans(source: &str, absolute_start: usize) -> Vec<TokenSpan<'_>> 
         }
     }
     if let Some(start) = token_start {
-        tokens.push(TokenSpan {
+        tokens.push(HeaderToken {
             text: &source[start..],
             start: absolute_start + start,
             end: absolute_start + source.len(),

@@ -1,7 +1,7 @@
 use surgeist_template::{
-    AttrPart, AttrValue, AttributeKind, AttributeRule, AttributeSpec, ComponentRegistry,
+    AttrPart, AttrValue, AttributeKind, AttributeRule, AttributeSpec, BinaryOp, ComponentRegistry,
     ComponentSpec, Expr, Literal, NativeElementRegistry, NativeElementSpec, Node, ParseErrorKind,
-    PathSegment, RegistryError, ValidationErrorKind, parse_template, render_to_rust,
+    PathSegment, RegistryError, UnaryOp, ValidationErrorKind, parse_template, render_to_rust,
     validate_template,
 };
 
@@ -197,6 +197,105 @@ fn parses_scalar_literals_and_indexed_variable_paths() {
     assert_eq!(path.root(), "items");
     assert!(matches!(path.segments()[0], PathSegment::Index(_)));
     assert!(matches!(path.segments()[1], PathSegment::Field(_)));
+}
+
+#[test]
+fn parses_expression_operators_in_template_syntax() {
+    let document = parse_template(
+        r#"{if !($visible && false)}<Panel count={$count > 0} total={$a + 2 * 3} />{/if}"#,
+    )
+    .expect("template parses");
+
+    let Node::If(if_node) = &document.nodes()[0] else {
+        panic!("expected if node");
+    };
+    let Expr::Unary {
+        op: UnaryOp::Not,
+        expr,
+    } = if_node.branches()[0].condition()
+    else {
+        panic!("expected not condition");
+    };
+    assert!(matches!(
+        **expr,
+        Expr::Binary {
+            op: BinaryOp::And,
+            ..
+        }
+    ));
+
+    let Node::Element(panel) = &if_node.branches()[0].children()[0] else {
+        panic!("expected panel child");
+    };
+    assert!(matches!(
+        panel.attributes()[0].value(),
+        AttrValue::Expression(Expr::Binary {
+            op: BinaryOp::Gt,
+            ..
+        })
+    ));
+
+    let AttrValue::Expression(Expr::Binary {
+        op: BinaryOp::Add,
+        right,
+        ..
+    }) = panel.attributes()[1].value()
+    else {
+        panic!("expected addition attribute");
+    };
+    assert!(matches!(
+        **right,
+        Expr::Binary {
+            op: BinaryOp::Mul,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn parses_spaced_foreach_collection_expression() {
+    let document = parse_template(r#"{foreach $a + $b as $item}<Text>{$item}</Text>{/foreach}"#)
+        .expect("template parses");
+
+    let Node::ForEach(for_each) = &document.nodes()[0] else {
+        panic!("expected foreach node");
+    };
+    assert!(matches!(
+        for_each.collection(),
+        Expr::Binary {
+            op: BinaryOp::Add,
+            ..
+        }
+    ));
+    assert_eq!(for_each.item_name().as_str(), "item");
+}
+
+#[test]
+fn parses_foreach_header_with_flexible_as_whitespace() {
+    for source in [
+        r#"{foreach $items  as $item}<Text>{$item}</Text>{/foreach}"#,
+        "{foreach $items\tas\t$item}<Text>{$item}</Text>{/foreach}",
+        "{foreach $items\nas\n$item}<Text>{$item}</Text>{/foreach}",
+    ] {
+        let document = parse_template(source).expect(source);
+
+        let Node::ForEach(for_each) = &document.nodes()[0] else {
+            panic!("expected foreach node");
+        };
+        assert!(matches!(for_each.collection(), Expr::Variable(_)));
+        assert_eq!(for_each.item_name().as_str(), "item");
+    }
+}
+
+#[test]
+fn rejects_extra_tokens_after_foreach_item_binding() {
+    let error = parse_template("{foreach $items as $item extra}<Text>{$item}</Text>{/foreach}")
+        .expect_err("extra item token fails");
+
+    assert!(matches!(
+        error.kind(),
+        ParseErrorKind::InvalidExpression { .. }
+    ));
 }
 
 #[test]
