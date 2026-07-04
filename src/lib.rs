@@ -6,6 +6,20 @@
 
 #![forbid(unsafe_code)]
 
+mod ast;
+mod error;
+mod expr;
+mod lexer;
+mod name;
+mod parser;
+mod render;
+mod span;
+mod validate;
+
+pub use error::{ParseError, ParseErrorKind, ValidationError, ValidationErrorKind};
+pub use name::{AttributeName, ComponentName, NameError, NativeElementName, VariableName};
+pub use span::{SourcePos, SourceSpan};
+
 /// Crate identity string used by smoke tests and API artifacts.
 pub const CRATE_NAME: &str = "surgeist-template";
 
