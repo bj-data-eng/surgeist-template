@@ -115,9 +115,137 @@ impl PathIndex {
     }
 }
 
+pub fn parse_simple_expr(source: &str) -> Result<Expr, &'static str> {
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Err("empty expression");
+    }
+
+    match trimmed {
+        "true" => return Ok(Expr::Literal(Literal::Bool(true))),
+        "false" => return Ok(Expr::Literal(Literal::Bool(false))),
+        "null" => return Ok(Expr::Literal(Literal::Null)),
+        _ => {}
+    }
+
+    if let Some(path) = trimmed.strip_prefix('$') {
+        return parse_variable_path(path).map(Expr::Variable);
+    }
+
+    if let Some(value) = parse_quoted_string(trimmed)? {
+        return Ok(Expr::Literal(Literal::String(value)));
+    }
+
+    if let Ok(value) = trimmed.parse::<i64>() {
+        return Ok(Expr::Literal(Literal::Int(value)));
+    }
+
+    if trimmed.contains('.')
+        && let Ok(value) = trimmed.parse::<f64>()
+    {
+        return Ok(Expr::Literal(Literal::Float(value)));
+    }
+
+    Err("unsupported expression")
+}
+
+fn parse_variable_path(path: &str) -> Result<VariablePath, &'static str> {
+    if path.is_empty() {
+        return Err("empty variable path");
+    }
+
+    let mut rest = path;
+    let root_end = rest.find(['.', '[']).unwrap_or(rest.len());
+    let root = &rest[..root_end];
+    if root.is_empty() {
+        return Err("empty variable root");
+    }
+    rest = &rest[root_end..];
+
+    let mut segments = Vec::new();
+    while !rest.is_empty() {
+        if let Some(after_dot) = rest.strip_prefix('.') {
+            if after_dot.is_empty() {
+                return Err("empty path field");
+            }
+            let field_end = after_dot.find(['.', '[']).unwrap_or(after_dot.len());
+            let field = &after_dot[..field_end];
+            if field.is_empty() {
+                return Err("empty path field");
+            }
+            segments.push(PathSegment::Field(
+                PathField::try_new(field).map_err(|_| "invalid path field")?,
+            ));
+            rest = &after_dot[field_end..];
+            continue;
+        }
+
+        if let Some(after_open) = rest.strip_prefix('[') {
+            let Some(close_index) = after_open.find(']') else {
+                return Err("unclosed path index");
+            };
+            let index = &after_open[..close_index];
+            if index.is_empty() {
+                return Err("empty path index");
+            }
+            if !index.chars().all(|ch| ch.is_ascii_digit()) {
+                return Err("invalid path index");
+            }
+            let parsed = index.parse::<u64>().map_err(|_| "invalid path index")?;
+            segments.push(PathSegment::Index(PathIndex::new(parsed)));
+            rest = &after_open[close_index + 1..];
+            continue;
+        }
+
+        return Err("invalid variable path");
+    }
+
+    VariablePath::try_new(root, segments).map_err(|_| "invalid variable path")
+}
+
+fn parse_quoted_string(source: &str) -> Result<Option<String>, &'static str> {
+    if !source.starts_with('"') && !source.starts_with('\'') {
+        return Ok(None);
+    }
+
+    let quote = source.chars().next().expect("checked quote");
+    if !source.ends_with(quote) || source.len() == quote.len_utf8() {
+        return Err("unterminated string literal");
+    }
+
+    let inner = &source[quote.len_utf8()..source.len() - quote.len_utf8()];
+    let mut value = String::new();
+    let mut chars = inner.chars();
+    while let Some(ch) = chars.next() {
+        if ch == quote {
+            return Err("unescaped quote in string literal");
+        }
+        if ch == '\\' {
+            let Some(escaped) = chars.next() else {
+                return Err("unterminated escape");
+            };
+            match escaped {
+                '\\' => value.push('\\'),
+                '"' => value.push('"'),
+                '\'' => value.push('\''),
+                'n' => value.push('\n'),
+                'r' => value.push('\r'),
+                't' => value.push('\t'),
+                _ => return Err("unsupported escape"),
+            }
+        } else {
+            value.push(ch);
+        }
+    }
+
+    Ok(Some(value))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BinaryOp, Expr, Literal, PathField, PathIndex, PathSegment, VariablePath};
+    use super::{
+        BinaryOp, Expr, Literal, PathField, PathIndex, PathSegment, VariablePath, parse_simple_expr,
+    };
 
     #[test]
     fn variable_path_preserves_segments() {
@@ -177,5 +305,46 @@ mod tests {
     #[test]
     fn path_index_exposes_value() {
         assert_eq!(PathIndex::new(42).get(), 42);
+    }
+
+    #[test]
+    fn parses_task_three_simple_expressions() {
+        assert!(matches!(
+            parse_simple_expr("true").expect("bool"),
+            Expr::Literal(Literal::Bool(true))
+        ));
+        assert!(matches!(
+            parse_simple_expr("42").expect("int"),
+            Expr::Literal(Literal::Int(42))
+        ));
+        assert!(matches!(
+            parse_simple_expr("4.25").expect("float"),
+            Expr::Literal(Literal::Float(4.25))
+        ));
+        assert!(matches!(
+            parse_simple_expr(r#""hello""#).expect("string"),
+            Expr::Literal(Literal::String(value)) if value == "hello"
+        ));
+        assert!(matches!(
+            parse_simple_expr("$items[0].name").expect("path"),
+            Expr::Variable(_)
+        ));
+    }
+
+    #[test]
+    fn rejects_task_three_malformed_paths() {
+        for source in [
+            "$",
+            "$.name",
+            "$items.",
+            "$items..name",
+            "$items[]",
+            "$items[-1]",
+            "$items[abc]",
+            "$items[0",
+            "$items[0][1]",
+        ] {
+            assert!(parse_simple_expr(source).is_err(), "{source}");
+        }
     }
 }
