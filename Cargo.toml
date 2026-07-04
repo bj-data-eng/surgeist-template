@@ -1,0 +1,12 @@
+[package]
+name = "surgeist-template"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/bj-data-eng/surgeist-template"
+readme = "README.md"
+description = "Template and DSL-facing contracts for Surgeist."
+
+[lib]
+name = "surgeist_template"
+path = "src/lib.rs"
