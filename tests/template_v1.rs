@@ -1,7 +1,8 @@
 use surgeist_template::{
     AttrPart, AttrValue, AttributeKind, AttributeRule, AttributeSpec, ComponentRegistry,
     ComponentSpec, Expr, Literal, NativeElementRegistry, NativeElementSpec, Node, ParseErrorKind,
-    PathSegment, RegistryError, ValidationErrorKind, parse_template, validate_template,
+    PathSegment, RegistryError, ValidationErrorKind, parse_template, render_to_rust,
+    validate_template,
 };
 
 #[test]
@@ -424,4 +425,51 @@ fn parent_unknown_component_error_wins_over_child_validation() {
         error.kind(),
         ValidationErrorKind::UnknownComponent { name } if name == "MissingWidget"
     ));
+}
+
+#[test]
+fn renders_validated_component_with_expression_attribute_and_interpolation_child() {
+    let document = parse_template(r#"<Panel count={$count}>Hello {$user.name}</Panel>"#)
+        .expect("template parses");
+    let native = NativeElementRegistry::try_from_specs(Vec::new()).expect("valid native registry");
+    let components = ComponentRegistry::try_from_specs(vec![
+        ComponentSpec::try_new(
+            "Panel",
+            vec![
+                AttributeSpec::try_new("count", AttributeRule::one(AttributeKind::Expression))
+                    .expect("valid attr spec"),
+            ],
+        )
+        .expect("valid component spec"),
+    ])
+    .expect("valid component registry");
+    let validated = validate_template(&document, &native, &components).expect("template validates");
+
+    assert_eq!(
+        render_to_rust(&validated),
+        r#"::surgeist::template::template(vec![::surgeist::template::component("Panel", vec![::surgeist::template::attr_expr("count", "$count")], vec![::surgeist::template::text("Hello "), ::surgeist::template::expr("$user.name")])])"#
+    );
+}
+
+#[test]
+fn renders_keyword_variable_expression_as_symbolic_string() {
+    let document = parse_template(r#"<Panel value={$match} />"#).expect("template parses");
+    let native = NativeElementRegistry::try_from_specs(Vec::new()).expect("valid native registry");
+    let components = ComponentRegistry::try_from_specs(vec![
+        ComponentSpec::try_new(
+            "Panel",
+            vec![
+                AttributeSpec::try_new("value", AttributeRule::one(AttributeKind::Expression))
+                    .expect("valid attr spec"),
+            ],
+        )
+        .expect("valid component spec"),
+    ])
+    .expect("valid component registry");
+    let validated = validate_template(&document, &native, &components).expect("template validates");
+
+    assert_eq!(
+        render_to_rust(&validated),
+        r#"::surgeist::template::template(vec![::surgeist::template::component("Panel", vec![::surgeist::template::attr_expr("value", "$match")], vec![])])"#
+    );
 }

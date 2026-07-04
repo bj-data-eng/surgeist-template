@@ -24,6 +24,7 @@ pub use error::{ParseError, ParseErrorKind, ValidationError, ValidationErrorKind
 pub use expr::{BinaryOp, Expr, Literal, PathField, PathIndex, PathSegment, UnaryOp, VariablePath};
 pub use name::{AttributeName, ComponentName, NameError, NativeElementName, VariableName};
 pub use parser::parse_template;
+pub use render::render_to_rust;
 pub use span::{SourcePos, SourceSpan};
 pub use validate::{
     AttributeKind, AttributeRule, AttributeSpec, ComponentRegistry, ComponentSpec,
